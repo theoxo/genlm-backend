@@ -112,7 +112,7 @@ class AsyncTransformer(AsyncLM):
         return cls(mod, tok, **kwargs)
 
     @torch.no_grad()
-    def __init__(self, hf_model, hf_tokenizer, batch_size=20, timeout=0.02, cache_hidden_states=False):
+    def __init__(self, hf_model, hf_tokenizer, batch_size=20, timeout=0.02, cache_hidden_states=False, hidden_state_layer=-1):
         """Initialize an AsyncTransformer instance.
 
         Args:
@@ -124,12 +124,15 @@ class AsyncTransformer(AsyncLM):
                 Defaults to 0.02.
             cache_hidden_states (bool, optional): Whether to cache hidden states alongside logits.
                 Defaults to False.
+            hidden_state_layer (int, optional): Which layer to cache (-1 for last, -2 for second-to-last, etc.).
+                Defaults to -1.
         """
         self.model = hf_model
         self.tokenizer = hf_tokenizer
         self.device = hf_model.device
         self.cache = TokenTrie()
         self.cache_hidden_states = cache_hidden_states
+        self.hidden_state_layer = hidden_state_layer
 
         # Queries to be batched. Each query is a sequence of tokens,
         # and a Future to be called when the query is resolved.
@@ -155,11 +158,10 @@ class AsyncTransformer(AsyncLM):
         to completion."""
         self.queries = []
 
-    def get_hidden_states(self, token_ids, layer=-1):
-        """Retrieve cached hidden states for a token sequence at specified layer.
+    def get_hidden_states(self, token_ids):
+        """Retrieve cached hidden states for a token sequence.
 
         :param token_ids: List of token IDs
-        :param layer: Which layer to extract (-1 for last layer, -2 for second-to-last, etc.)
         :return: Tensor of shape [seq_len, hidden_dim] containing hidden states
         """
         if not self.cache_hidden_states:
@@ -174,7 +176,7 @@ class AsyncTransformer(AsyncLM):
             node = node.get_token(token_id)
             if node.hidden_states is None:
                 raise ValueError(f"No hidden states cached for token {token_id}")
-            hidden_states_list.append(node.hidden_states[layer])
+            hidden_states_list.append(node.hidden_states)
 
         return torch.stack(hidden_states_list)
 
@@ -190,7 +192,9 @@ class AsyncTransformer(AsyncLM):
             output_hidden_states=self.cache_hidden_states,
         )
         hidden_states = result.hidden_states if self.cache_hidden_states else None
-        node = self.cache.extend_cache(0, prompt_tokens, result.logits[0], 0, hidden_states)
+        node = self.cache.extend_cache(
+            0, prompt_tokens, result.logits[0], 0, hidden_states, self.hidden_state_layer
+        )
         node.past_key_values = result.past_key_values
 
     @torch.no_grad()
@@ -365,7 +369,9 @@ class AsyncTransformer(AsyncLM):
         logits, hidden_states = await future
 
         # Create new nodes
-        node = node.extend_cache(next_token_index, token_ids, logits, base, hidden_states)
+        node = node.extend_cache(
+            next_token_index, token_ids, logits, base, hidden_states, self.hidden_state_layer
+        )
 
         return node.logprobs
 
@@ -397,7 +403,9 @@ class AsyncTransformer(AsyncLM):
         logits = result.logits[0]
         hidden_states = result.hidden_states if self.cache_hidden_states else None
 
-        node = node.extend_cache(next_token_index, token_ids, logits, base, hidden_states)
+        node = node.extend_cache(
+            next_token_index, token_ids, logits, base, hidden_states, self.hidden_state_layer
+        )
 
         return node.logprobs
 

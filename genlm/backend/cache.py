@@ -88,7 +88,7 @@ class TokenTrie:
         self.children[token_id] = TokenTrie(self, logprobs)
         return self.children[token_id]
 
-    def extend_cache(self, next_token_index, token_ids, logits, base, hidden_states=None):
+    def extend_cache(self, next_token_index, token_ids, logits, base, hidden_states=None, layer=-1):
         node = self
 
         for j in range(next_token_index, len(token_ids)):
@@ -99,9 +99,7 @@ class TokenTrie:
             node = node.add_token(token_id, token_logprobs.cpu())
 
             if hidden_states is not None:
-                node.hidden_states = tuple(
-                    layer_hidden[0, j - base].cpu() for layer_hidden in hidden_states
-                )
+                node.hidden_states = hidden_states[layer][0, j - base].cpu()
 
         return node
 
