@@ -112,7 +112,7 @@ class AsyncTransformer(AsyncLM):
         return cls(mod, tok, **kwargs)
 
     @torch.no_grad()
-    def __init__(self, hf_model, hf_tokenizer, batch_size=20, timeout=0.02):
+    def __init__(self, hf_model, hf_tokenizer, batch_size=20, timeout=0.02, cache_hidden_states=False):
         """Initialize an AsyncTransformer instance.
 
         Args:
@@ -122,11 +122,14 @@ class AsyncTransformer(AsyncLM):
                 Defaults to 20.
             timeout (float, optional): Seconds to wait since last query before processing current batch.
                 Defaults to 0.02.
+            cache_hidden_states (bool, optional): Whether to cache hidden states alongside logits.
+                Defaults to False.
         """
         self.model = hf_model
         self.tokenizer = hf_tokenizer
         self.device = hf_model.device
         self.cache = TokenTrie()
+        self.cache_hidden_states = cache_hidden_states
 
         # Queries to be batched. Each query is a sequence of tokens,
         # and a Future to be called when the query is resolved.
@@ -152,6 +155,29 @@ class AsyncTransformer(AsyncLM):
         to completion."""
         self.queries = []
 
+    def get_hidden_states(self, token_ids, layer=-1):
+        """Retrieve cached hidden states for a token sequence at specified layer.
+
+        :param token_ids: List of token IDs
+        :param layer: Which layer to extract (-1 for last layer, -2 for second-to-last, etc.)
+        :return: Tensor of shape [seq_len, hidden_dim] containing hidden states
+        """
+        if not self.cache_hidden_states:
+            raise ValueError("cache_hidden_states must be True to use get_hidden_states")
+
+        node = self.cache
+        hidden_states_list = []
+
+        for token_id in token_ids:
+            if not node.has_token(token_id):
+                raise KeyError(f"Token {token_id} not found in cache")
+            node = node.get_token(token_id)
+            if node.hidden_states is None:
+                raise ValueError(f"No hidden states cached for token {token_id}")
+            hidden_states_list.append(node.hidden_states[layer])
+
+        return torch.stack(hidden_states_list)
+
     @torch.no_grad()
     def cache_kv(self, prompt_tokens):
         """Cache the key and value vectors for a prompt. Future queries that have this prompt as a prefix will only run the LLM on new tokens.
@@ -159,8 +185,12 @@ class AsyncTransformer(AsyncLM):
         Args:
             prompt_tokens (list[int]): token ids for the prompt to cache.
         """
-        result = self.model(torch.tensor([prompt_tokens]).to(self.device))
-        node = self.cache.extend_cache(0, prompt_tokens, result.logits[0], 0)
+        result = self.model(
+            torch.tensor([prompt_tokens]).to(self.device),
+            output_hidden_states=self.cache_hidden_states,
+        )
+        hidden_states = result.hidden_states if self.cache_hidden_states else None
+        node = self.cache.extend_cache(0, prompt_tokens, result.logits[0], 0, hidden_states)
         node.past_key_values = result.past_key_values
 
     @torch.no_grad()
@@ -242,12 +272,15 @@ class AsyncTransformer(AsyncLM):
             position_ids=posn_ids,
             past_key_values=pasts,
             use_cache=pasts is not None,
+            output_hidden_states=self.cache_hidden_states,
         )
 
         assert len(results.logits) == len(unique_queries)
 
         for i, q in enumerate(unique_queries):
-            result = results.logits[i]
+            logits = results.logits[i]
+            hidden_states = results.hidden_states if self.cache_hidden_states else None
+            result = (logits, hidden_states)
             for dup_query in query_groups[tuple(q.prompt)]:
                 dup_query.future.set_result(result)
 
@@ -329,10 +362,10 @@ class AsyncTransformer(AsyncLM):
         # Create a future with the prompt
         future = asyncio.get_running_loop().create_future()
         self.add_query(token_ids[base:], future, past)
-        logits = await future
+        logits, hidden_states = await future
 
         # Create new nodes
-        node = node.extend_cache(next_token_index, token_ids, logits, base)
+        node = node.extend_cache(next_token_index, token_ids, logits, base, hidden_states)
 
         return node.logprobs
 
@@ -355,13 +388,16 @@ class AsyncTransformer(AsyncLM):
         if next_token_index == len(token_ids):
             return node.logprobs
 
-        logits = self.model(
+        result = self.model(
             torch.tensor([token_ids[base:]]).to(self.device),
             past_key_values=node.past_key_values,
             use_cache=node.past_key_values is not None,
-        ).logits[0]
+            output_hidden_states=self.cache_hidden_states,
+        )
+        logits = result.logits[0]
+        hidden_states = result.hidden_states if self.cache_hidden_states else None
 
-        node = node.extend_cache(next_token_index, token_ids, logits, base)
+        node = node.extend_cache(next_token_index, token_ids, logits, base, hidden_states)
 
         return node.logprobs
 

@@ -59,6 +59,7 @@ class TokenTrie:
         self.children = {}  # maps token ID to child
         self.logprobs = logprobs  # for next token
         self.past_key_values = None
+        self.hidden_states = None
 
     def __repr__(self):
         return (
@@ -87,7 +88,7 @@ class TokenTrie:
         self.children[token_id] = TokenTrie(self, logprobs)
         return self.children[token_id]
 
-    def extend_cache(self, next_token_index, token_ids, logits, base):
+    def extend_cache(self, next_token_index, token_ids, logits, base, hidden_states=None):
         node = self
 
         for j in range(next_token_index, len(token_ids)):
@@ -96,6 +97,11 @@ class TokenTrie:
             token_logprobs = torch.log_softmax(token_logits, 0)
 
             node = node.add_token(token_id, token_logprobs.cpu())
+
+            if hidden_states is not None:
+                node.hidden_states = tuple(
+                    layer_hidden[0, j - base].cpu() for layer_hidden in hidden_states
+                )
 
         return node
 
