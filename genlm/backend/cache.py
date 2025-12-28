@@ -88,7 +88,9 @@ class TokenTrie:
         self.children[token_id] = TokenTrie(self, logprobs)
         return self.children[token_id]
 
-    def extend_cache(self, next_token_index, token_ids, logits, base, hidden_states=None, layer=-1):
+    def extend_cache(
+        self, next_token_index, token_ids, logits, base, hidden_states=None, layer=-1
+    ):
         node = self
 
         for j in range(next_token_index, len(token_ids)):

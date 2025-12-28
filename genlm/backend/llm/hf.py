@@ -112,7 +112,15 @@ class AsyncTransformer(AsyncLM):
         return cls(mod, tok, **kwargs)
 
     @torch.no_grad()
-    def __init__(self, hf_model, hf_tokenizer, batch_size=20, timeout=0.02, cache_hidden_states=False, hidden_state_layer=-1):
+    def __init__(
+        self,
+        hf_model,
+        hf_tokenizer,
+        batch_size=20,
+        timeout=0.02,
+        cache_hidden_states=False,
+        hidden_state_layer=-1,
+    ):
         """Initialize an AsyncTransformer instance.
 
         Args:
@@ -165,7 +173,9 @@ class AsyncTransformer(AsyncLM):
         :return: Tensor of shape [seq_len, hidden_dim] containing hidden states
         """
         if not self.cache_hidden_states:
-            raise ValueError("cache_hidden_states must be True to use get_hidden_states")
+            raise ValueError(
+                "cache_hidden_states must be True to use get_hidden_states"
+            )
 
         node = self.cache
         hidden_states_list = []
@@ -193,7 +203,12 @@ class AsyncTransformer(AsyncLM):
         )
         hidden_states = result.hidden_states if self.cache_hidden_states else None
         node = self.cache.extend_cache(
-            0, prompt_tokens, result.logits[0], 0, hidden_states, self.hidden_state_layer
+            0,
+            prompt_tokens,
+            result.logits[0],
+            0,
+            hidden_states,
+            self.hidden_state_layer,
         )
         node.past_key_values = result.past_key_values
 
@@ -370,7 +385,12 @@ class AsyncTransformer(AsyncLM):
 
         # Create new nodes
         node = node.extend_cache(
-            next_token_index, token_ids, logits, base, hidden_states, self.hidden_state_layer
+            next_token_index,
+            token_ids,
+            logits,
+            base,
+            hidden_states,
+            self.hidden_state_layer,
         )
 
         return node.logprobs
@@ -404,7 +424,12 @@ class AsyncTransformer(AsyncLM):
         hidden_states = result.hidden_states if self.cache_hidden_states else None
 
         node = node.extend_cache(
-            next_token_index, token_ids, logits, base, hidden_states, self.hidden_state_layer
+            next_token_index,
+            token_ids,
+            logits,
+            base,
+            hidden_states,
+            self.hidden_state_layer,
         )
 
         return node.logprobs
