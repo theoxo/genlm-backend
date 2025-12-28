@@ -1,6 +1,6 @@
 [project]
 name = "genlm-backend"
-dynamic = ["version"]
+version = "0.2.0"
 description = ""
 readme = "README.md"
 requires-python = ">=3.10"
@@ -40,5 +40,3 @@ exclude = ["benchmark*", "tests*"]
 [build-system]
 requires = ["setuptools>=64.0", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools_scm]
