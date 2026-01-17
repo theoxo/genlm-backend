@@ -185,9 +185,13 @@ class AsyncTransformer(AsyncLM):
         node = self.cache
         hidden_states_list = []
 
-        for token_id in token_ids:
+        for i, token_id in enumerate(token_ids):
             if not node.has_token(token_id):
-                raise KeyError(f"Token {token_id} not found in cache")
+                available = list(node.children.keys())[:20]
+                raise KeyError(
+                    f"Token {token_id} not found in cache at position {i}/{len(token_ids)}. "
+                    f"Available: {available}"
+                )
             node = node.get_token(token_id)
             if node.hidden_states is None:
                 raise ValueError(f"No hidden states cached for token {token_id}")
