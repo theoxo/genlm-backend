@@ -105,9 +105,14 @@ class AsyncTransformer(AsyncLM):
             _hf_opts.update(hf_opts)
 
         tok = AutoTokenizer.from_pretrained(model_id)
-        mod = AutoModelForCausalLM.from_pretrained(
-            model_id, quantization_config=bnb_config, **_hf_opts
-        )
+        if bnb_config is not None:
+            mod = AutoModelForCausalLM.from_pretrained(
+                model_id, quantization_config=bnb_config, **_hf_opts
+            )
+        else:
+            mod = AutoModelForCausalLM.from_pretrained(
+                model_id, **_hf_opts
+            )
 
         return cls(mod, tok, **kwargs)
 
